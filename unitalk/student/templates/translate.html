@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Sign Language Recognition</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+        #video-container {
+            margin-top: 20px;
+            position: relative;
+        }
+        #video-stream {
+            width: 640px;
+            height: 480px;
+            transform: scaleX(-1); /* Flip the video horizontally */
+        }
+        #roi-frame {
+            position: absolute;
+            margin-top: 60px;
+            margin-right: 50px;
+            top: 0;
+            right: 0;
+            width: 250px;
+            height: 250px;
+            border: 2px solid red;
+            display: none; /* Initially hidden */
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #predicted-text {
+            margin-top: 20px;
+            font-size: 18px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Unitalk: Sign Language Translation</h1>
+    <div class="container">
+        <div>
+            <button id="start-btn">Start Video Capture</button>
+            <button id="stop-btn" disabled>Stop Video Capture</button>
+        </div>
+        <div id="video-container">
+            <video id="video-stream" autoplay></video>
+            <div id="roi-frame"></div>
+        </div>
+        <p id="predicted-text" style="display:none;">Predicted Text: <span id="recognized_text">Waiting for prediction...</span></p>
+    </div>
+
+    <script>
+        let videoStream;
+        let isCapturing = false;
+
+        // Function to start video capture
+        async function startCapture() {
+            isCapturing = true;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                document.getElementById('video-stream').srcObject = stream;
+                document.getElementById('roi-frame').style.display = 'block'; // Show ROI frame
+                captureFrames();
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+            }
+        }
+
+        // Function to stop video capture
+        function stopCapture() {
+            isCapturing = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            videoStream.getTracks().forEach(track => {
+                track.stop();
+            });
+            document.getElementById('roi-frame').style.display = 'none'; // Hide ROI frame
+        }
+
+        // Event listeners for start and stop buttons
+        document.getElementById('start-btn').addEventListener('click', startCapture);
+        document.getElementById('stop-btn').addEventListener('click', stopCapture);
+
+        // Function to capture frames and send them to the server for processing
+        async function captureFrames() {
+            const video = document.getElementById('video-stream');
+
+            while (isCapturing) {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const imageData = canvas.toDataURL('image/jpeg');
+
+                const formData = new FormData();
+                formData.append('image_data', imageData);
+
+                try {
+                    const csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+                    const response = await fetch('/process_frame/', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken,
+                        },
+                        body: formData,
+                    });
+                    const jsonData = await response.json();
+                    // Update the predicted text on the webpage
+                    document.getElementById('recognized_text').innerText = jsonData.predicted_text;
+                    document.getElementById('predicted-text').style.display = 'block';
+                } catch (error) {
+                    console.error('Error processing image:', error);
+                }
+
+                // Adjust frame capture frequency as needed
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+    </script>
+    <!-- CSRF token -->
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+</body>
+</html>

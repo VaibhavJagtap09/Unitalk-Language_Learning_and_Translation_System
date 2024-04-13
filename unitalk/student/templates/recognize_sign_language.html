@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Sign Language Recognition</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+        #video-container {
+            margin-top: 20px;
+            position: relative;
+        }
+        #video-stream {
+            width: 640px;
+            height: 480px;
+            transform: scaleX(-1); /* Flip the video horizontally */
+        }
+        #roi {
+            position: absolute;
+            top: 20px; /* Adjust top position as needed */
+            right: 20px; /* Adjust right position as needed */
+            border: 2px solid red;
+            display: none; /* Initially hide the ROI */
+            transform: scaleX(-1);
+        }
+        #overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #predicted-text {
+            margin-top: 20px;
+            font-size: 18px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Unitalk: Sign Language Translation</h1>
+    <div class="container">
+        <div>
+            <button id="start-btn" onclick="startCapture()">Start Video Capture</button>
+            <button id="stop-btn" onclick="stopCapture()" disabled>Stop Video Capture</button>
+        </div>
+        <div id="video-container">
+            <video id="video-stream" autoplay></video>
+            <div id="overlay">
+                <h2>Predicted Text:</h2>
+                <p id="predicted-text">Waiting for prediction...</p>
+            </div>
+            <!-- Region of Interest (ROI) -->
+            <canvas id="roi"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let videoStream;
+        let isCapturing = false;
+
+        // Function to start video capture
+        async function startCapture() {
+            isCapturing = true;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                document.getElementById('video-stream').srcObject = stream;
+                // Show the ROI when starting video capture
+                document.getElementById('roi').style.display = 'block';
+                captureFrames();
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+            }
+        }
+
+        // Function to stop video capture
+        function stopCapture() {
+            isCapturing = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            videoStream.getTracks().forEach(track => {
+                track.stop();
+            });
+            // Hide the ROI when stopping video capture
+            document.getElementById('roi').style.display = 'none';
+        }
+
+        // Function to capture frames and send them to the server for processing
+async function captureFrames() {
+    const video = document.getElementById('video-stream');
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+
+    // Get the ROI canvas
+    const roiCanvas = document.getElementById('roi');
+    const roiContext = roiCanvas.getContext('2d');
+
+    while (isCapturing) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Define ROI dimensions and position
+        const roiWidth = 250;
+        const roiHeight = 250;
+        const roiX = canvas.width - roiWidth - 20; // Adjust right position
+        const roiY = 20; // Adjust top position
+
+        // Clear previous ROI content
+        roiContext.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+
+        // Draw ROI on the canvas
+        roiCanvas.width = roiWidth;
+        roiCanvas.height = roiHeight;
+        roiContext.drawImage(video, roiX, roiY, roiWidth, roiHeight, 0, 0, roiWidth, roiHeight);
+
+        const imageData = roiCanvas.toDataURL('image/jpeg');
+
+        console.log('Captured frame:', imageData); // Add logging statement
+
+        const formData = new FormData();
+        formData.append('image_data', imageData);
+
+        try {
+            const csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+            const response = await fetch('/process_frame/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                },
+                body: formData,
+            });
+            const jsonData = await response.json();
+            // Update the predicted text on the webpage
+            document.getElementById('predicted-text').innerText = jsonData.predicted_text;
+        } catch (error) {
+            console.error('Error processing image:', error);
+        }
+
+        // Adjust frame capture frequency as needed
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+}
+
+    </script>
+    <!-- CSRF token -->
+    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+</body>
+</html>
